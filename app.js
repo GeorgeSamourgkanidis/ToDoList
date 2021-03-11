@@ -1,56 +1,131 @@
+//jshint esversion:6
+
 const express = require("express");
 const bodyParser = require("body-parser");
-//local module
-const date = require(__dirname + "/date.js");
-let items = ["I love eating","I love sleeping","I love playing video games"];
-let workItems = [];
+const mongoose = require("mongoose");
+const _ = require("lodash");
+
 const app = express();
-app.use(bodyParser.urlencoded({extended: true}));
+
 app.set('view engine', 'ejs');
+
+app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.static("public"));
 
+mongoose.connect("mongodb link for database", {useNewUrlParser: true}, { useUnifiedTopology: true });
+
+const itemsSchema = {
+  name: String
+};
+
+const Item = mongoose.model("Item", itemsSchema);
+
+const item1 = new Item({
+  name: "Item1"
+});
+
+const item2 = new Item({
+  name: "Item2"
+});
+
+const item3 = new Item({
+  name: "Item3"
+});
+
+const defaultItems = [item1, item2, item3];
+
+const listSchema = {
+  name: String,
+  items: [itemsSchema]
+};
+const List = mongoose.model("List", listSchema);
+
 app.get("/", function(req, res) {
-  //απο το local module μου
-  let day = date.getDate();
-  //στο αρχειο list(ejs μεσα στο views default) αντικαθιστω το kindOfDay
-  res.render('list', {
-    listTitle: day,
-    newListItems: items
+
+  Item.find({}, function(err, foundItems){
+    if(foundItems.length === 0){
+      Item.insertMany(defaultItems, function(err){
+        if(err){
+          console.log(err);
+        } else{
+          console.log("Success added Array");
+        }
+      });
+      res.redirect("/");
+    } else{
+      res.render("list", {listTitle: "Today", newListItems: foundItems});
+    }
   });
 });
 
-app.get("/work", function(req,res){
-  res.render("list",{
-    listTitle: "Work List",
-    newListItems: workItems
+app.post("/", function(req, res){
+
+  const itemName = req.body.newItem;
+  const listName = req.body.list;
+  const item = new Item({
+    name: itemName
   });
-});
 
-app.get("/about", function(req,res){
-  res.render("about");
-});
-
-app.post("/", function(req, res) {
-  //Παίρνω το input απο το html
-  let item = req.body.newItem;
-  //Τσεκάρω σε ποιο list ειμαι για να προσθέσω ανάλογα items
-  if(req.body.list === "work"){
-    workItems.push(item);
-    res.redirect("/work");
-  } else{
-    //δείνω δεδομένα στο html απο τον server και κανω redirect για να κανει ξανα
-    //render τα newListItems
-    items.push(item);
+  if(listName === "Today"){
+    item.save();
     res.redirect("/");
+  } else{
+    List.findOne({name: listName}, function(err, foundList){
+      foundList.items.push(item);
+      foundList.save();
+      res.redirect("/" + listName);
+    });
   }
 });
 
-app.post("/work", function(req,res){
-  let item = req.body.newItem;
-  workItems.push(item);
-  res.redirect("/work");
-})
+app.post("/delete", function(req,res){
+  const checkedItemId = req.body.checkbox;
+  const listName = req.body.listName;
+  if(listName === "Today"){
+    Item.findByIdAndRemove(checkedItemId, function(err){
+      if(err){
+        console.log(err);
+      } else{
+        console.log("Successfully Deleted");
+        res.redirect("/");
+      }
+    });
+  } else{
+    List.findOneAndUpdate({name: listName}, {$pull: {items: {_id: checkedItemId}}}, function(err, foundList){
+       if (!err){
+         res.redirect("/" + listName);
+       }
+     });
+  }
+});
+
+app.get("/:customListName", function(req,res){
+  const customListName = _.capitalize(req.params.customListName);
+  List.findOne({name: customListName}, function(err, foundList){
+    if(err){
+      console.log(err);
+    } else{
+      if(!foundList){
+        //Create a new list
+        const list = new List({
+          name: customListName,
+          items: defaultItems
+        });
+        list.save();
+        res.redirect("/" + customListName);
+      } else{
+        //Show an existing list
+        res.render("list", {listTitle: foundList.name, newListItems: foundList.items})
+      }
+    }
+  });
+
+});
+
+app.get("/about", function(req, res){
+  res.render("about");
+});
 
 app.listen(process.env.PORT || 3000, function() {
-  console.log("started");
+  console.log("Server started Successfully");
 });
